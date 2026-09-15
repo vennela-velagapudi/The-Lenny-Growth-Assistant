@@ -19,6 +19,7 @@ class AgentResponse(BaseModel):
     answer: str
     grounded: bool
     sources: List[Dict[str, Any]]
+    artifact: Optional[Dict[str, Any]] = None
 
 class InsufficientEvidenceException(BaseException):
     """
@@ -89,15 +90,44 @@ class LennyAgent:
             raise ValueError(f"Unsupported LLM provider: {settings.LLM_PROVIDER}")
 
     async def run(self, user_message: str, conversation_history: List[Dict[str, str]] = None) -> AgentResponse:
-        """Runs the Pi Coding Agent loop."""
+        """Runs the agent loop with deterministic intent routing."""
+        import re
         if not conversation_history:
             conversation_history = []
             
-        # Reset state for this run
+        provider = self._get_provider()
+        
+        # Lightweight Deterministic Routing
+        is_ship30 = re.search(r'(?i)\bship\s?30\b', user_message)
+        is_artifact = re.search(r'(?i)\b(landing page|product brief|html|markdown|generate an? artifact)\b', user_message)
+        
+        if is_ship30:
+            logger.info("routing_to_ship30_skill")
+            from app.skills.ship30 import Ship30Skill
+            skill = Ship30Skill(self.db, provider)
+            result = await skill.execute(user_message, conversation_history)
+            return AgentResponse(
+                answer=result["answer"],
+                grounded=result["grounded"],
+                sources=result["sources"],
+                artifact=result["artifact"]
+            )
+            
+        if is_artifact:
+            logger.info("routing_to_artifact_skill")
+            from app.skills.artifact import ArtifactSkill
+            skill = ArtifactSkill(self.db, provider)
+            result = await skill.execute(user_message, conversation_history)
+            return AgentResponse(
+                answer=result["answer"],
+                grounded=result["grounded"],
+                sources=result["sources"],
+                artifact=result["artifact"]
+            )
+
+        # Standard Q&A flow
         self.current_sources = []
         self.current_grounded = False
-
-        provider = self._get_provider()
         
         search_tool = Tool(
             name="search_transcripts",
@@ -116,19 +146,16 @@ class LennyAgent:
         )
         
         registry = ToolRegistry([search_tool])
-        
-        # Pi Coding Agent requires a sandbox, even if we don't use file tools
         sandbox = Sandbox(root=".")
         
         config = AgentConfig(
             system_prompt=self.system_prompt,
             stream=False,
             enable_shell=False,
-            auto_approve=True, # no interactive confirm prompt for tools
+            auto_approve=True,
             max_iterations=5
         )
         
-        # Pre-seed history
         pi_messages = []
         for msg in conversation_history:
             pi_messages.append({"role": msg["role"], "content": msg["content"]})
@@ -144,22 +171,21 @@ class LennyAgent:
         logger.info("calling_agent_loop", provider=settings.LLM_PROVIDER)
         
         try:
-            # We call run, which will execute tools using the registry
             final_answer = agent.run(user_message)
-            
             return AgentResponse(
                 answer=final_answer,
                 grounded=self.current_grounded,
-                sources=self.current_sources
+                sources=self.current_sources,
+                artifact=None
             )
             
         except InsufficientEvidenceException:
-            # Deterministic interception
             logger.info("insufficient_evidence_triggered")
             return AgentResponse(
                 answer="I couldn't find sufficient evidence in the available Lenny transcript knowledge base to answer that confidently.",
                 grounded=False,
-                sources=self.current_sources
+                sources=self.current_sources,
+                artifact=None
             )
         except Exception as e:
             logger.error("agent_loop_error", error=str(e))

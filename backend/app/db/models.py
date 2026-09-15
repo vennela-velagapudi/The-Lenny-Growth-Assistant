@@ -23,6 +23,7 @@ class Session(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
     user: User = Relationship(back_populates="sessions")
     messages: List["Message"] = Relationship(back_populates="session")
+    artifacts: List["Artifact"] = Relationship(back_populates="session")
     
 class Message(SQLModel, table=True):
     __tablename__ = "messages"
@@ -37,11 +38,19 @@ class Message(SQLModel, table=True):
 class Artifact(SQLModel, table=True):
     __tablename__ = "artifacts"
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    message_id: uuid.UUID = Field(foreign_key="messages.id")
+    session_id: uuid.UUID = Field(foreign_key="sessions.id", nullable=True) # Added for Phase 4
+    message_id: Optional[uuid.UUID] = Field(foreign_key="messages.id", nullable=True)
     artifact_type: str
+    title: str = Field(default="Untitled Artifact")
     content: str
+    metadata_json: Optional[str] = Field(default="{}")
     created_at: datetime = Field(default_factory=utc_now)
-    message: Message = Relationship(back_populates="artifacts")
+    updated_at: datetime = Field(default_factory=utc_now)
+    
+    message: Optional[Message] = Relationship(back_populates="artifacts")
+    session: Optional[Session] = Relationship(back_populates="artifacts")
+
+
 
 class TranscriptSource(SQLModel, table=True):
     __tablename__ = "transcript_sources"

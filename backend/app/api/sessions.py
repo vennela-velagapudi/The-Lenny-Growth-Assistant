@@ -36,12 +36,19 @@ class SourceResponse(BaseModel):
     text: str
     similarity: float
 
+class ArtifactResponse(BaseModel):
+    id: UUID
+    type: str
+    title: str
+    content: str
+
 class MessageResponse(BaseModel):
     id: UUID
     role: str
     content: str
     grounded: Optional[bool] = None
     sources: Optional[List[SourceResponse]] = None
+    artifact: Optional[ArtifactResponse] = None
     created_at: str
 
     class Config:
@@ -49,10 +56,6 @@ class MessageResponse(BaseModel):
 
 @router.post("", response_model=SessionResponse)
 def create_session(request: SessionCreate, db: Session = Depends(get_session)):
-    # Create an anonymous user for now (since no auth is required in this phase)
-    # Ideally, we would track this via session cookie, but creating a generic user works for the API.
-    # We will just create a new user per session to fulfill the User/Session relationship easily,
-    # or find a default "anonymous" user. Let's just create a new user.
     user = User(metadata_json="{}")
     db.add(user)
     db.commit()
@@ -91,21 +94,16 @@ async def send_message(session_id: UUID, request: MessageRequest, db: Session = 
     if not chat_session:
         raise HTTPException(status_code=404, detail="Session not found")
         
-    # Store user message
     user_msg = Message(session_id=session_id, role="user", content=request.content)
     db.add(user_msg)
     db.commit()
     
-    # Retrieve conversation history (only simple text messages)
     history = db.exec(
         select(Message).where(Message.session_id == session_id).order_by(Message.created_at)
     ).all()
     
     formatted_history = []
-    # Exclude the current message we just added
     for msg in history[:-1]:
-        # Strip metadata from assistant content if we stored it as JSON
-        # For simplicity, we just pass the raw text to LLM
         content_text = msg.content
         if msg.role == "assistant":
             try:
@@ -119,18 +117,37 @@ async def send_message(session_id: UUID, request: MessageRequest, db: Session = 
     try:
         response = await agent.run(request.content, formatted_history)
     except Exception as e:
-        # Structured error
         raise HTTPException(status_code=503, detail={
             "code": "LLM_UNAVAILABLE",
             "message": str(e)
         })
         
-    # Store assistant message
-    # We store the structured response as JSON in the content field so we can parse it easily
+    # Handle generated artifact
+    artifact_data = None
+    if response.artifact:
+        from app.db.models import Artifact
+        db_artifact = Artifact(
+            session_id=session_id,
+            artifact_type=response.artifact.get("type", "markdown"),
+            title=response.artifact.get("title", "Generated Artifact"),
+            content=response.artifact.get("content", "")
+        )
+        db.add(db_artifact)
+        db.commit()
+        db.refresh(db_artifact)
+        
+        artifact_data = {
+            "id": db_artifact.id,
+            "type": db_artifact.artifact_type,
+            "title": db_artifact.title,
+            "content": db_artifact.content
+        }
+
     content_json = json.dumps({
         "answer": response.answer,
         "grounded": response.grounded,
-        "sources": response.sources
+        "sources": response.sources,
+        "artifact": {"id": str(artifact_data["id"]), "type": artifact_data["type"], "title": artifact_data["title"], "content": artifact_data["content"]} if artifact_data else None
     })
     
     assistant_msg = Message(session_id=session_id, role="assistant", content=content_json)
@@ -144,6 +161,7 @@ async def send_message(session_id: UUID, request: MessageRequest, db: Session = 
         "content": response.answer,
         "grounded": response.grounded,
         "sources": response.sources,
+        "artifact": artifact_data,
         "created_at": assistant_msg.created_at.isoformat()
     }
 
@@ -168,6 +186,7 @@ def get_messages(session_id: UUID, db: Session = Depends(get_session)):
                     "content": parsed.get("answer", ""),
                     "grounded": parsed.get("grounded", False),
                     "sources": parsed.get("sources", []),
+                    "artifact": parsed.get("artifact", None),
                     "created_at": msg.created_at.isoformat()
                 })
             except json.JSONDecodeError:
@@ -186,3 +205,26 @@ def get_messages(session_id: UUID, db: Session = Depends(get_session)):
             })
             
     return responses
+
+@router.get("/{session_id}/artifacts")
+def get_artifacts(session_id: UUID, db: Session = Depends(get_session)):
+    chat_session = db.get(ChatSession, session_id)
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+        
+    from app.db.models import Artifact
+    artifacts = db.exec(
+        select(Artifact).where(Artifact.session_id == session_id).order_by(Artifact.created_at)
+    ).all()
+    
+    return [
+        {
+            "id": a.id,
+            "type": a.artifact_type,
+            "title": a.title,
+            "content": a.content,
+            "created_at": a.created_at.isoformat(),
+            "updated_at": a.updated_at.isoformat()
+        } for a in artifacts
+    ]
+

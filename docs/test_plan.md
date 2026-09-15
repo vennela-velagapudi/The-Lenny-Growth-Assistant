@@ -37,3 +37,11 @@
 4.  **RAG Grounding:** Ask about a topic *not* in Lenny's podcast. Verify the system explicitly refuses to answer or states lack of evidence.
 5.  **Citations:** Ask a covered topic. Verify the response includes a citation (e.g., "Source: Lenny's Podcast — Episode 1").
 6.  **Security:** Request a malicious HTML artifact with an alert. Verify the alert does not fire when rendered.
+
+
+## Phase 4 Additions
+- Ship 30 Skill: Deterministic intent routing directs requests for 'Ship 30' pieces into a dedicated skill module.
+- Artifact Generation: Artifacts (Markdown, HTML) are generated via specialized prompts, tracked, and stored in PostgreSQL.
+- UI & Viewer: React frontend split layout with interactive chat and side-by-side artifact viewer.
+- Security: HTML artifacts are sanitized via DOMPurify and placed inside a sandboxed iframe to prevent JS execution or DOM escape.
+

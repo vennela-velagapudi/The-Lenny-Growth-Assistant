@@ -43,3 +43,11 @@ If you do not have Docker/Ollama, ingestion will fail to generate embeddings unl
 Session creation and agent execution can be hit directly via the REST API endpoints:
 - `POST /api/sessions` (Create a chat session)
 - `POST /api/sessions/{session_id}/messages` (Send a message and trigger the agent loop)
+
+
+## Phase 4 Additions
+- Ship 30 Skill: Deterministic intent routing directs requests for 'Ship 30' pieces into a dedicated skill module.
+- Artifact Generation: Artifacts (Markdown, HTML) are generated via specialized prompts, tracked, and stored in PostgreSQL.
+- UI & Viewer: React frontend split layout with interactive chat and side-by-side artifact viewer.
+- Security: HTML artifacts are sanitized via DOMPurify and placed inside a sandboxed iframe to prevent JS execution or DOM escape.
+

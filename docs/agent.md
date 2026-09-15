@@ -49,3 +49,11 @@ Context is persisted in PostgreSQL. Conversations are isolated by `session_id`. 
 - Missing API keys yield structured 503 errors (`LLM_UNAVAILABLE`).
 - LLM timeouts and HTTP errors are caught and surfaced cleanly.
 - `structlog` is utilized to emit observable metadata (latency, provider, model) without leaking full transcript chunks or API keys into standard output.
+
+
+## Phase 4 Additions
+- Ship 30 Skill: Deterministic intent routing directs requests for 'Ship 30' pieces into a dedicated skill module.
+- Artifact Generation: Artifacts (Markdown, HTML) are generated via specialized prompts, tracked, and stored in PostgreSQL.
+- UI & Viewer: React frontend split layout with interactive chat and side-by-side artifact viewer.
+- Security: HTML artifacts are sanitized via DOMPurify and placed inside a sandboxed iframe to prevent JS execution or DOM escape.
+
