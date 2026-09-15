@@ -3,7 +3,7 @@
 This document outlines the proposed implementation plan for the "Lenny Growth Assistant" full-stack AI conversational web application, incorporating the specific evaluation rubric requirements.
 
 ## 1. Agent SDK Requirement
-*   The agent layer will be built using the **Anthropic Claude Agent SDK**.
+*   The agent layer will be built using the **Pi Coding Agent**.
 *   **Limitation & Abstraction Strategy:** The Anthropic SDK is natively designed around Anthropic's API and message structures. To support the mandatory Ollama requirement without polluting business logic, we will separate agent orchestration from the LLM execution layer. We will implement an adapter that translates Anthropic SDK tool-calling structures to Ollama's format (or rely on a clean `LLMProvider` abstraction that wraps both, mapping standard conversational structures to the provider's native format). The business layer will strictly depend on the Anthropic SDK orchestration, and the LLM execution will go through the `LLMProvider`.
 
 ## 2. LLM Provider Abstraction

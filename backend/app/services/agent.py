@@ -1,11 +1,17 @@
 import json
 from typing import List, Dict, Any, Optional
-from anthropic import AsyncAnthropic
 from app.core.config import settings
 from app.services.retriever import TranscriptRetriever
 from sqlmodel import Session
 from pydantic import BaseModel
 import structlog
+
+# Pi Coding Agent SDK imports
+from pi_agent.agent import Agent, AgentConfig
+from pi_agent.tools.registry import ToolRegistry
+from pi_agent.tools.base import Tool
+from pi_agent.sandbox import Sandbox
+from pi_agent.llm import AnthropicProvider, OpenAIProvider
 
 logger = structlog.get_logger()
 
@@ -13,6 +19,13 @@ class AgentResponse(BaseModel):
     answer: str
     grounded: bool
     sources: List[Dict[str, Any]]
+
+class InsufficientEvidenceException(BaseException):
+    """
+    Inherits from BaseException to bypass ToolRegistry's Exception catching.
+    This guarantees a deterministic halt of the LLM tool loop.
+    """
+    pass
 
 class LennyAgent:
     def __init__(self, db_session: Session):
@@ -26,25 +39,19 @@ class LennyAgent:
             "If the provided evidence is insufficient to answer the user's question, you MUST state that "
             "there is insufficient evidence in the transcripts and refrain from answering."
         )
+        
+        # State used during a single run
+        self.current_sources = []
+        self.current_grounded = False
 
-        self.retrieval_tool = {
-            "name": "search_transcripts",
-            "description": "Searches the transcript knowledge base for relevant chunks. Use this to find evidence before answering.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query to find relevant podcast discussions."
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-
-    async def execute_tool(self, query: str) -> Dict[str, Any]:
-        """Executes the retriever and formats the results for the LLM."""
+    def search_transcripts_handler(self, args: dict[str, Any], sandbox: Sandbox) -> str:
+        """Handler for the search_transcripts tool."""
+        query = args.get("query", "")
+        if not query:
+            return "Error: missing query."
+            
         result = self.retriever.retrieve(query)
+        self.current_grounded = result.has_relevant_context
         
         sources = []
         for r in result.results:
@@ -58,190 +65,102 @@ class LennyAgent:
                 "text": r.text,
                 "similarity": r.similarity
             })
+        self.current_sources = sources
+        
+        if not self.current_grounded:
+            # Deterministically short-circuit the agent loop immediately.
+            raise InsufficientEvidenceException()
             
-        return {
-            "has_relevant_context": result.has_relevant_context,
-            "sources": sources
-        }
+        return json.dumps(sources)
 
-    async def run(self, user_message: str, conversation_history: List[Dict[str, str]] = None) -> AgentResponse:
-        """Runs the agent loop with the configured provider."""
-        if not conversation_history:
-            conversation_history = []
-
+    def _get_provider(self):
         if settings.LLM_PROVIDER.lower() == "anthropic":
-            return await self._run_anthropic(user_message, conversation_history)
+            if not settings.ANTHROPIC_API_KEY:
+                raise ValueError("ANTHROPIC_API_KEY is missing.")
+            return AnthropicProvider(model=settings.ANTHROPIC_MODEL, api_key=settings.ANTHROPIC_API_KEY)
         elif settings.LLM_PROVIDER.lower() == "ollama":
-            return await self._run_ollama(user_message, conversation_history)
+            # Pi Agent supports OpenAI protocol, which Ollama fully implements.
+            return OpenAIProvider(
+                model=settings.OLLAMA_MODEL, 
+                api_key="ollama", 
+                base_url=f"{settings.OLLAMA_URL}/v1"
+            )
         else:
             raise ValueError(f"Unsupported LLM provider: {settings.LLM_PROVIDER}")
 
-    async def _run_anthropic(self, user_message: str, conversation_history: List[Dict[str, str]]) -> AgentResponse:
-        if not settings.ANTHROPIC_API_KEY:
-            raise ValueError("ANTHROPIC_API_KEY is missing.")
+    async def run(self, user_message: str, conversation_history: List[Dict[str, str]] = None) -> AgentResponse:
+        """Runs the Pi Coding Agent loop."""
+        if not conversation_history:
+            conversation_history = []
             
-        client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-        
-        messages = conversation_history.copy()
-        messages.append({"role": "user", "content": user_message})
+        # Reset state for this run
+        self.current_sources = []
+        self.current_grounded = False
 
-        logger.info("calling_anthropic_agent")
+        provider = self._get_provider()
         
-        try:
-            # Step 1: Initial LLM call
-            response = await client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
-                max_tokens=1024,
-                system=self.system_prompt,
-                messages=messages,
-                tools=[self.retrieval_tool]
-            )
-            
-            # Step 2: Handle tool calls
-            final_answer = ""
-            grounded = False
-            used_sources = []
-            
-            if response.stop_reason == "tool_use":
-                # Extract tool call
-                tool_call = next((c for c in response.content if c.type == "tool_use"), None)
-                if tool_call and tool_call.name == "search_transcripts":
-                    query = tool_call.input.get("query", "")
-                    
-                    # Execute deterministic tool
-                    tool_result = await self.execute_tool(query)
-                    
-                    # Track context observability
-                    grounded = tool_result["has_relevant_context"]
-                    used_sources = tool_result["sources"]
-                    
-                    # If not grounded, intercept deterministically (Application-level boundary)
-                    if not grounded:
-                        final_answer = "I could not find sufficient evidence in the transcripts to answer your question."
-                        return AgentResponse(answer=final_answer, grounded=False, sources=[])
-
-                    # Step 3: Append tool result and get final response
-                    messages.append({
-                        "role": "assistant",
-                        "content": response.content
-                    })
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": tool_call.id,
-                                "content": json.dumps(tool_result["sources"])
-                            }
-                        ]
-                    })
-                    
-                    final_response = await client.messages.create(
-                        model=settings.ANTHROPIC_MODEL,
-                        max_tokens=1024,
-                        system=self.system_prompt,
-                        messages=messages
-                    )
-                    final_answer = final_response.content[0].text
-            else:
-                # Agent decided not to use tools (e.g. conversational greeting)
-                final_answer = next((c.text for c in response.content if c.type == "text"), "")
-                grounded = False # Not grounded if no search was performed
-                
-            return AgentResponse(
-                answer=final_answer,
-                grounded=grounded,
-                sources=used_sources
-            )
-            
-        except Exception as e:
-            logger.error("anthropic_agent_error", error=str(e))
-            raise
-
-    async def _run_ollama(self, user_message: str, conversation_history: List[Dict[str, str]]) -> AgentResponse:
-        import httpx
-        # We use httpx to call Ollama directly to handle native tool calling structure
-        
-        messages = conversation_history.copy()
-        messages.append({"role": "user", "content": user_message})
-
-        logger.info("calling_ollama_agent")
-        
-        # Ollama supports a subset of OpenAI-like tool calling format
-        ollama_tool = {
-            "type": "function",
-            "function": {
-                "name": "search_transcripts",
-                "description": "Searches the transcript knowledge base for relevant chunks.",
-                "parameters": self.retrieval_tool["input_schema"]
-            }
-        }
-        
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    f"{settings.OLLAMA_URL}/api/chat",
-                    json={
-                        "model": settings.OLLAMA_MODEL,
-                        "messages": [{"role": "system", "content": self.system_prompt}] + messages,
-                        "tools": [ollama_tool],
-                        "stream": False
+        search_tool = Tool(
+            name="search_transcripts",
+            description="Searches the transcript knowledge base for relevant chunks. Use this to find evidence before answering.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to find relevant podcast discussions."
                     }
-                )
-                response.raise_for_status()
-                data = response.json()
-                
-            message_data = data.get("message", {})
-            tool_calls = message_data.get("tool_calls", [])
+                },
+                "required": ["query"]
+            },
+            handler=self.search_transcripts_handler
+        )
+        
+        registry = ToolRegistry([search_tool])
+        
+        # Pi Coding Agent requires a sandbox, even if we don't use file tools
+        sandbox = Sandbox(root=".")
+        
+        config = AgentConfig(
+            system_prompt=self.system_prompt,
+            stream=False,
+            enable_shell=False,
+            auto_approve=True, # no interactive confirm prompt for tools
+            max_iterations=5
+        )
+        
+        # Pre-seed history
+        pi_messages = []
+        for msg in conversation_history:
+            pi_messages.append({"role": msg["role"], "content": msg["content"]})
             
-            grounded = False
-            used_sources = []
-            final_answer = ""
+        agent = Agent(
+            provider=provider,
+            registry=registry,
+            sandbox=sandbox,
+            config=config,
+            messages=pi_messages
+        )
+
+        logger.info("calling_agent_loop", provider=settings.LLM_PROVIDER)
+        
+        try:
+            # We call run, which will execute tools using the registry
+            final_answer = agent.run(user_message)
             
-            if tool_calls:
-                tool_call = tool_calls[0]
-                if tool_call["function"]["name"] == "search_transcripts":
-                    query = tool_call["function"]["arguments"].get("query", "")
-                    
-                    # Execute tool
-                    tool_result = await self.execute_tool(query)
-                    grounded = tool_result["has_relevant_context"]
-                    used_sources = tool_result["sources"]
-                    
-                    if not grounded:
-                        final_answer = "I could not find sufficient evidence in the transcripts to answer your question."
-                        return AgentResponse(answer=final_answer, grounded=False, sources=[])
-                        
-                    # Append tool response
-                    messages.append(message_data)
-                    messages.append({
-                        "role": "tool",
-                        "content": json.dumps(tool_result["sources"])
-                    })
-                    
-                    # Second call
-                    async with httpx.AsyncClient(timeout=120.0) as client2:
-                        response2 = await client2.post(
-                            f"{settings.OLLAMA_URL}/api/chat",
-                            json={
-                                "model": settings.OLLAMA_MODEL,
-                                "messages": [{"role": "system", "content": self.system_prompt}] + messages,
-                                "stream": False
-                            }
-                        )
-                        response2.raise_for_status()
-                        data2 = response2.json()
-                        final_answer = data2.get("message", {}).get("content", "")
-            else:
-                final_answer = message_data.get("content", "")
-                grounded = False
-                
             return AgentResponse(
                 answer=final_answer,
-                grounded=grounded,
-                sources=used_sources
+                grounded=self.current_grounded,
+                sources=self.current_sources
             )
             
-        except httpx.HTTPError as e:
-            logger.error("ollama_agent_error", error=str(e))
-            raise RuntimeError("Ollama provider is unavailable or failed.")
+        except InsufficientEvidenceException:
+            # Deterministic interception
+            logger.info("insufficient_evidence_triggered")
+            return AgentResponse(
+                answer="I couldn't find sufficient evidence in the available Lenny transcript knowledge base to answer that confidently.",
+                grounded=False,
+                sources=self.current_sources
+            )
+        except Exception as e:
+            logger.error("agent_loop_error", error=str(e))
+            raise

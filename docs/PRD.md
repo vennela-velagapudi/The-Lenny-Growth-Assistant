@@ -29,6 +29,6 @@
 - Retrieval must identify `has_relevant_context=False` if no results meet the minimum similarity threshold.
 ## Acceptance Criteria (Phase 3: Agent)
 - The system must provide independent sessions, correctly isolating context per session.
-- An agent loop utilizing the official **Anthropic Agent SDK** (with an Ollama alternative) must orchestrate tool usage.
+- An agent loop utilizing the official **Pi Coding Agent** (with an Ollama alternative) must orchestrate tool usage.
 - Grounding must be strictly deterministic: If the retriever yields weak evidence, the application must abort generating an answer using a pre-defined fallback prompt.
 - Source traceability must remain intact and bubbled out to the JSON response interface.

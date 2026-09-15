@@ -36,7 +36,7 @@ An abstract `LLMProvider` interface defines `generate` and `stream` methods.
 `OllamaProvider` and `AnthropicProvider` implement this interface. The app configuration (`LLM_PROVIDER`) dictates which provider is instantiated at runtime.
 
 ## Agent SDK Integration
-We use the Anthropic Claude Agent SDK for orchestration. To support Ollama, our `LLMProvider` implementation for Ollama translates the SDK's expected prompt/tool structures into the Ollama API format, maintaining a clean boundary.
+We use the Pi Coding Agent for orchestration. To support Ollama, our `LLMProvider` implementation for Ollama translates the SDK's expected prompt/tool structures into the Ollama API format, maintaining a clean boundary.
 
 ## Artifact Security
 HTML artifacts are rendered in an `<iframe>` with `sandbox=""` to prevent JS execution and external resource loading. Markdown is sanitized client-side.

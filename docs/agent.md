@@ -4,9 +4,26 @@
 An agentic approach is required to translate open-ended user questions into deterministic queries against the knowledge base. Rather than blindly embedding the user's question and stuffing the context with unstructured text, the agent dynamically determines if it *needs* to search the transcripts, formulates a specific query based on conversational context, and evaluates the returned evidence.
 
 ## Required Agent Framework
-The **Anthropic Claude Agent SDK** (via the official `anthropic` Python client's Tool Use API) is utilized as the primary agent framework for Anthropic models. We explicitly bypass unconstrained abstractions (like LangChain) to maintain strict deterministic boundaries between the LLM and our application state.
+The **Pi Coding Agent** (`pi_agent`) framework is utilized as the primary agent framework, satisfying the assignment requirements. We explicitly bypass unconstrained abstractions (like LangChain) to maintain strict deterministic boundaries.
 
-For local execution (`Ollama`), we implement a parallel lightweight tool-calling loop utilizing the Ollama native `/api/chat` tools capability.
+`pi-coding-agent` natively supports both `AnthropicProvider` (via `anthropic` Python client) and `OpenAIProvider` (which perfectly maps to Ollama's local `/v1/chat/completions` endpoint). This completely unifies our agent loop, meaning the exact same tool execution routing powers both cloud and local models without needing parallel logic.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    User([User Request]) --> API[FastAPI /api/sessions]
+    API --> Agent[LennyAgent / pi_agent.Agent]
+    Agent <--> Provider{LLMProvider}
+    Provider -.-> Anthropic[Anthropic API]
+    Provider -.-> Ollama[Ollama Local API]
+    Agent --> Tool(search_transcripts_handler)
+    Tool --> Retriever[TranscriptRetriever]
+    Retriever <--> DB[(PostgreSQL pgvector)]
+    Tool -- InsufficientEvidenceException --> Agent
+    Agent --> API
+```
+
 
 ## Agent Tools
 Currently, the agent is equipped with a single tool:

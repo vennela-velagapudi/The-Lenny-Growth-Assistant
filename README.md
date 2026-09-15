@@ -3,7 +3,7 @@
 A full-stack AI conversational web application built as a Forward Deployed Engineer evaluation.
 
 ## Features
-- AI conversational agent built with Anthropic Claude Agent SDK.
+- AI conversational agent built with Pi Coding Agent.
 - Support for local inference via Ollama (default) and cloud models (Anthropic).
 - RAG using Lenny's Podcast transcripts.
 - Strict RAG grounding with source citations.
@@ -14,7 +14,7 @@ A full-stack AI conversational web application built as a Forward Deployed Engin
 
 This project is structured as a FastAPI backend powered by PostgreSQL (`pgvector`).
 - **Retrieval System**: Transcripts are ingested natively. Cosine distance retrieves the top-K semantic matches.
-- **Conversational Agent**: We utilize the official **Anthropic Claude Agent SDK** for tool routing. A deterministic grounding policy short-circuits the LLM if evidence falls below the threshold, preventing hallucination.
+- **Conversational Agent**: We utilize the official **Pi Coding Agent** for tool routing. A deterministic grounding policy short-circuits the LLM if evidence falls below the threshold, preventing hallucination.
 - **LLM Provider Abstraction**: Supports both Anthropic Claude (via the SDK) and local execution via Ollama (using `/api/chat` native tools).
 
 ## Setup Instructions
