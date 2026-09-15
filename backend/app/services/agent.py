@@ -117,17 +117,7 @@ class LennyAgent:
         ship30_skill = Ship30Skill(self.db, provider, set_artifact)
         artifact_skill = ArtifactSkill(self.db, provider, set_artifact, get_history)
 
-        # Lightweight Deterministic Routing mapping to Tools
-        is_ship30 = re.search(r'(?i)\bship\s?30\b', user_message)
-        is_artifact = re.search(r'(?i)\b(landing page|product brief|html|markdown|generate an? artifact)\b', user_message)
-        
-        if is_ship30:
-            logger.info("routing_to_ship30_tool")
-            user_message += "\n\n[SYSTEM DIRECTIVE: The user wants a Ship 30 essay. You MUST use the `generate_ship30_artifact` tool to fulfill this request. Call the tool and summarize the success.]"
-        elif is_artifact:
-            logger.info("routing_to_artifact_tool")
-            user_message += "\n\n[SYSTEM DIRECTIVE: The user wants a custom artifact. You MUST use the `generate_custom_artifact` tool to fulfill this request. Call the tool and summarize the success.]"
-
+        # Instantiate ToolRegistry and tools first so we can route to them
         search_tool = Tool(
             name="search_transcripts",
             description="Searches the transcript knowledge base for relevant chunks. Use this to find evidence before answering.",
@@ -151,30 +141,51 @@ class LennyAgent:
         ])
         
         sandbox = Sandbox(root=".")
-        
-        config = AgentConfig(
-            system_prompt=self.system_prompt,
-            stream=False,
-            enable_shell=False,
-            auto_approve=True,
-            max_iterations=5
-        )
-        
-        pi_messages = []
-        for msg in conversation_history:
-            pi_messages.append({"role": msg["role"], "content": msg["content"]})
-            
-        agent = Agent(
-            provider=provider,
-            registry=registry,
-            sandbox=sandbox,
-            config=config,
-            messages=pi_messages
-        )
 
-        logger.info("calling_agent_loop", provider=settings.LLM_PROVIDER)
+        # Lightweight Deterministic Routing mapping to Tools
+        is_ship30 = re.search(r'(?i)\bship\s?30\b', user_message)
+        is_artifact = re.search(r'(?i)\b(landing page|product brief|html|markdown|generate an? artifact)\b', user_message)
         
         try:
+            if is_ship30:
+                logger.info("deterministic_route", tool="generate_ship30_artifact")
+                final_answer = registry.run("generate_ship30_artifact", {"topic": user_message}, sandbox)
+                return AgentResponse(
+                    answer=final_answer,
+                    grounded=self.current_grounded,
+                    sources=self.current_sources,
+                    artifact=self.current_artifact
+                )
+            elif is_artifact:
+                logger.info("deterministic_route", tool="generate_custom_artifact")
+                artifact_type = "html" if "html" in user_message.lower() or "landing page" in user_message.lower() else "markdown"
+                final_answer = registry.run("generate_custom_artifact", {"topic": user_message, "artifact_type": artifact_type}, sandbox)
+                return AgentResponse(
+                    answer=final_answer,
+                    grounded=self.current_grounded,
+                    sources=self.current_sources,
+                    artifact=self.current_artifact
+                )
+            
+            # Standard conversational loop
+            config = AgentConfig(
+                system_prompt=self.system_prompt,
+                stream=False,
+                enable_shell=False,
+                auto_approve=True,
+                max_iterations=5
+            )
+            
+            pi_messages = [{"role": msg["role"], "content": msg["content"]} for msg in conversation_history]
+            agent = Agent(
+                provider=provider,
+                registry=registry,
+                sandbox=sandbox,
+                config=config,
+                messages=pi_messages
+            )
+
+            logger.info("calling_agent_loop", provider=settings.LLM_PROVIDER)
             final_answer = agent.run(user_message)
             return AgentResponse(
                 answer=final_answer,

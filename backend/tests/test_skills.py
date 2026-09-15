@@ -53,15 +53,35 @@ def test_agent_uses_pi_agent_for_ship30(mock_db_session):
         with patch("app.core.config.settings.LLM_PROVIDER", "ollama"):
             agent = LennyAgent(mock_db_session)
             
-            with patch("pi_agent.agent.Agent.run") as mock_pi_run:
-                mock_pi_run.return_value = "Ship30 piece"
+            with patch("pi_agent.tools.registry.ToolRegistry.run") as mock_run:
+                mock_run.return_value = "Ship30 tool successfully executed"
                 
                 resp = await agent.run("Please write a Ship 30 about growth", [])
                 
-                # Check that pi agent run was called with the directive
-                mock_pi_run.assert_called_once()
-                call_arg = mock_pi_run.call_args[0][0]
-                assert "SYSTEM DIRECTIVE" in call_arg
-                assert "generate_ship30_artifact" in call_arg
+                from unittest.mock import ANY
+                # Check that pi agent ToolRegistry was called deterministically
+                mock_run.assert_called_once_with("generate_ship30_artifact", {"topic": "Please write a Ship 30 about growth"}, ANY)
+                assert resp.answer == "Ship30 tool successfully executed"
                 
     anyio.run(run_test)
+
+def test_agent_uses_pi_agent_for_artifact(mock_db_session):
+    async def run_test():
+        with patch("app.core.config.settings.LLM_PROVIDER", "ollama"):
+            agent = LennyAgent(mock_db_session)
+            
+            with patch("pi_agent.tools.registry.ToolRegistry.run") as mock_run:
+                mock_run.return_value = "HTML artifact executed"
+                
+                resp = await agent.run("Please generate a landing page artifact", [])
+                
+                from unittest.mock import ANY
+                mock_run.assert_called_once_with("generate_custom_artifact", {"topic": "Please generate a landing page artifact", "artifact_type": "html"}, ANY)
+                
+    anyio.run(run_test)
+
+def test_ship30_source_loaded(mock_db_session):
+    with patch("app.core.config.settings.LLM_PROVIDER", "ollama"):
+        skill = Ship30Skill(mock_db_session, MagicMock(), MagicMock())
+        assert "Digital Writer Mindset" in skill.ship30_framework_content
+        assert "4A Paths" in skill.ship30_framework_content

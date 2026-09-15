@@ -59,12 +59,14 @@ Context is persisted in PostgreSQL. Conversations are isolated by `session_id`. 
 
 
 ### Ship 30 for 30 Skill and Attribution
-The Ship 30 for 30 functionality is implemented natively as a Pi Agent Tool (generate_ship30_artifact). 
-Note on Source Attribution: The exact Ship 30 for 30 framework principles source document was not provided in the assignment repository. Therefore, this skill strictly retrieves and uses Lenny's podcast transcript evidence and follows a general Ship 30 format, without claiming principles from the official Ship 30 framework.
+The Ship 30 for 30 functionality is implemented natively as a Pi Agent Tool (`generate_ship30_artifact`). 
+Note on Source Attribution: The exact Ship 30 for 30 framework principles source document was not provided in the assignment repository. Therefore, the source was externally acquired from the official Ship 30 for 30 Ultimate Guide. To adhere to copyright constraints, only concise, attributed framework notes were encoded into the skill's source material (`data/ship30/ship30_ultimate_guide.md`). The generated piece explicitly maintains separate traceability, using the Ship 30 framework solely for structural guidance while pulling all factual claims deterministically from the retrieved Lenny transcript evidence.
+
+### Deterministic Pi Tool Invocation
+To guarantee execution without relying on LLM prompt obedience, the system maps intents (Ship30 and Custom Artifacts) explicitly to the `pi_agent.tools.registry.ToolRegistry.run` execution abstraction. This executes the registered tool handler deterministically through the official Pi Agent tool layer, strictly maintaining the agent architecture.
 
 ### Artifacts Tool
-Artifact generation is implemented as the generate_custom_artifact Pi Agent Tool. The agent invokes it passing the topic, which retrieves transcript evidence and returns a markdown or HTML structure natively.
+Artifact generation is similarly implemented as the `generate_custom_artifact` Pi Agent Tool and invoked deterministically. The agent invokes it passing the topic, which retrieves transcript evidence and returns a markdown or HTML structure natively.
 
 ### Dynamic Provider Config
-The backend provides a GET /api/config endpoint which returns the current LLM_PROVIDER and model (e.g. OLLAMA_MODEL) dynamically, rendering properly in the frontend React UI without hardcoded JSX.
-
+The backend provides a `GET /api/config` endpoint which returns the current `LLM_PROVIDER` and model (e.g. `OLLAMA_MODEL`) dynamically, rendering properly in the frontend React UI without hardcoded JSX.
