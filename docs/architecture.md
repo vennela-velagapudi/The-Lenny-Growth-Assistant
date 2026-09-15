@@ -7,6 +7,15 @@ The Lenny Growth Assistant is a full-stack application composed of:
 3.  **Database (PostgreSQL + pgvector):** Persistence for sessions, messages, artifacts, and embeddings.
 4.  **LLM Provider (Ollama / Anthropic):** The inference engine.
 
+## Phase 2: Knowledge Base & RAG Architecture
+- **Transcript Data Flow:** Raw markdown files are downloaded from the public repository and placed in `data/transcripts/`. The `IngestionService` computes a SHA-256 hash to ensure idempotency. Unchanged files are skipped, whereas modified ones have their old chunks replaced.
+- **Database Schema:** Two core tables are introduced: `TranscriptSource` for document-level metadata (episode title, guest name) and `TranscriptChunk` for individual text segments.
+- **Chunking Strategy:** `DocumentChunker` utilizes `tiktoken` to chunk text with a target size of 600 tokens and an overlap of 100 tokens, respecting paragraph boundaries (`\n\n`) whenever possible to maintain semantic cohesion.
+- **Embedding Architecture:** Embeddings are generated using the local Ollama API running the `nomic-embed-text` model. The resulting 768-dimensional vectors are stored in PostgreSQL utilizing the `pgvector` extension.
+- **Vector Retrieval:** `TranscriptRetriever` handles semantic search. The `cosine_distance` (`<=>`) operator is used for nearest-neighbor search. 
+- **Similarity Threshold:** A configurable threshold (default 0.5) ensures that `has_relevant_context` is explicitly set to `False` if no results meet the minimum relevance. This prevents hallucinated answers based on weak context.
+- **Source Traceability:** Every chunk maintains a direct relation to its source. The retriever contract guarantees that `source_id`, `episode_title`, and URL metadata are bubbled up to the agent layer for explicit citation.
+
 ## Database Schema
 - `User`: Lightweight identity.
 - `Session`: Chat session metadata, linked to a User.

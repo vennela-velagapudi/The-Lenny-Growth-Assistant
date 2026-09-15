@@ -16,9 +16,18 @@ A full-stack AI conversational web application built as a Forward Deployed Engin
 3. Access the frontend at `http://localhost:3000` (or the configured port).
 4. Access the backend API docs at `http://localhost:8000/docs`.
 
-### Ingestion
-To ingest transcripts into the knowledge base, run:
+### Transcript Data Source
+For this project, we rely on the public repository:
+[LennysNewsletter/lennys-newsletterpodcastdata](https://github.com/LennysNewsletter/lennys-newsletterpodcastdata)
+
+To ingest transcripts:
+1. Place markdown transcript files (`.md`) inside the `data/transcripts/` directory. (You can clone the repository above directly into this directory, or use `backend/scripts/download_samples.py`).
+2. Run database migrations: `docker compose exec backend alembic upgrade head`
+3. Pull the Ollama embedding model: `docker compose exec ollama ollama pull nomic-embed-text`
+4. Run the ingestion command:
 ```bash
 docker compose exec backend python scripts/ingest.py
 ```
-*(Ingestion requires the data/transcripts folder to be populated with markdown/text files).*
+*(Alternatively, run `python scripts/ingest.py` locally from the `backend` directory if outside Docker).*
+
+If you do not have Docker/Ollama, ingestion will fail to generate embeddings unless a mocked environment is configured.

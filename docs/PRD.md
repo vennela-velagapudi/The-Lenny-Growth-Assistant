@@ -21,3 +21,10 @@
 **Risks/Trade-offs:**
 - Running Ollama locally may be slower and less capable of strict tool-calling adherence compared to Claude. Mitigation: Provide very clear system prompts and robust fallback parsing.
 - HTML artifact generation poses XSS risks. Mitigation: Strict iframe sandboxing and content security policies.
+
+## Acceptance Criteria (Phase 2: Knowledge Base)
+- Transcripts must be stored in PostgreSQL utilizing pgvector for embeddings.
+- An idempotent ingestion script must reliably parse markdown, chunk (target 600 tokens), embed, and store text.
+- Retrieval must return top-K results ordered by similarity.
+- Retrieval must identify `has_relevant_context=False` if no results meet the minimum similarity threshold.
+- Chunks must retain `episode_title`, `source_url`, and other metadata for citation generation downstream.

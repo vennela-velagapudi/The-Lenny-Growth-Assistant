@@ -10,6 +10,17 @@
   - PostgreSQL/pgvector insertion and retrieval.
   - Session isolation (User A cannot see User B's messages).
 
+## Phase 2: Knowledge Base
+### Automated Tests
+- **Chunking Logic**: Unit tests to verify correct token sizes, overlaps, and handling of paragraph breaks. (Implemented in `test_chunker.py`)
+- **Idempotency**: Unit tests to verify that identical hashes are skipped during ingestion. (Implemented in `test_ingestion.py`)
+- **Retrieval Contract**: Unit tests to verify similarity threshold masking and `has_relevant_context` boolean. (Implemented in `test_retriever.py`)
+- **Integration**: Verifies pgvector is queryable (`<=>` operator works). (Implemented in `test_db.py`, skippable if DB missing).
+
+### Manual Tests
+1. Obtain real transcripts (e.g., using `scripts/download_samples.py`) and run `python scripts/ingest.py`. Verify logs output positive chunk counts.
+2. Re-run `python scripts/ingest.py` and verify `Skipped unchanged` equals the number of files.
+
 ## Manual Verification
 1.  **Setup:** Run `docker compose up`, verify all 4 containers start.
 2.  **Ollama Demo:** Ask a question, verify local inference works.
