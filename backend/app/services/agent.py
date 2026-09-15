@@ -90,45 +90,44 @@ class LennyAgent:
             raise ValueError(f"Unsupported LLM provider: {settings.LLM_PROVIDER}")
 
     async def run(self, user_message: str, conversation_history: List[Dict[str, str]] = None) -> AgentResponse:
-        """Runs the agent loop with deterministic intent routing."""
+        """Runs the agent loop with deterministic intent routing feeding into the Pi Agent."""
         import re
         if not conversation_history:
             conversation_history = []
             
         provider = self._get_provider()
         
-        # Lightweight Deterministic Routing
+        # State used during a single run
+        self.current_sources = []
+        self.current_grounded = False
+        self.current_artifact = None
+        self.history_context = conversation_history
+
+        def set_artifact(artifact: dict, sources: list):
+            self.current_artifact = artifact
+            self.current_sources = sources
+            self.current_grounded = True
+
+        def get_history():
+            return self.history_context
+            
+        from app.skills.ship30 import Ship30Skill
+        from app.skills.artifact import ArtifactSkill
+        
+        ship30_skill = Ship30Skill(self.db, provider, set_artifact)
+        artifact_skill = ArtifactSkill(self.db, provider, set_artifact, get_history)
+
+        # Lightweight Deterministic Routing mapping to Tools
         is_ship30 = re.search(r'(?i)\bship\s?30\b', user_message)
         is_artifact = re.search(r'(?i)\b(landing page|product brief|html|markdown|generate an? artifact)\b', user_message)
         
         if is_ship30:
-            logger.info("routing_to_ship30_skill")
-            from app.skills.ship30 import Ship30Skill
-            skill = Ship30Skill(self.db, provider)
-            result = await skill.execute(user_message, conversation_history)
-            return AgentResponse(
-                answer=result["answer"],
-                grounded=result["grounded"],
-                sources=result["sources"],
-                artifact=result["artifact"]
-            )
-            
-        if is_artifact:
-            logger.info("routing_to_artifact_skill")
-            from app.skills.artifact import ArtifactSkill
-            skill = ArtifactSkill(self.db, provider)
-            result = await skill.execute(user_message, conversation_history)
-            return AgentResponse(
-                answer=result["answer"],
-                grounded=result["grounded"],
-                sources=result["sources"],
-                artifact=result["artifact"]
-            )
+            logger.info("routing_to_ship30_tool")
+            user_message += "\n\n[SYSTEM DIRECTIVE: The user wants a Ship 30 essay. You MUST use the `generate_ship30_artifact` tool to fulfill this request. Call the tool and summarize the success.]"
+        elif is_artifact:
+            logger.info("routing_to_artifact_tool")
+            user_message += "\n\n[SYSTEM DIRECTIVE: The user wants a custom artifact. You MUST use the `generate_custom_artifact` tool to fulfill this request. Call the tool and summarize the success.]"
 
-        # Standard Q&A flow
-        self.current_sources = []
-        self.current_grounded = False
-        
         search_tool = Tool(
             name="search_transcripts",
             description="Searches the transcript knowledge base for relevant chunks. Use this to find evidence before answering.",
@@ -145,7 +144,12 @@ class LennyAgent:
             handler=self.search_transcripts_handler
         )
         
-        registry = ToolRegistry([search_tool])
+        registry = ToolRegistry([
+            search_tool,
+            ship30_skill.get_tool(),
+            artifact_skill.get_tool()
+        ])
+        
         sandbox = Sandbox(root=".")
         
         config = AgentConfig(
@@ -176,7 +180,7 @@ class LennyAgent:
                 answer=final_answer,
                 grounded=self.current_grounded,
                 sources=self.current_sources,
-                artifact=None
+                artifact=self.current_artifact
             )
             
         except InsufficientEvidenceException:

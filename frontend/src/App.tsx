@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import DOMPurify from 'dompurify';
 import './App.css';
-import { createSession, sendMessage } from './api';
-import type { Session, Message, Artifact } from './api';
+import { createSession, sendMessage, fetchConfig } from './api';
+import type { Session, Message, Artifact, AppConfig } from './api';
 
 function App() {
+  const [config, setConfig] = useState<AppConfig | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -14,6 +15,10 @@ function App() {
   
   // Right side Artifact Viewer state
   const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
+
+  useEffect(() => {
+    fetchConfig().then(setConfig).catch(console.error);
+  }, []);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -81,7 +86,7 @@ function App() {
         
         {/* Environment / Provider Visibility */}
         <div className="provider-indicator">
-          <strong>Provider:</strong> Local &bull; Ollama &bull; llama3
+          <strong>Provider:</strong> {config ? `${config.mode === 'local' ? 'Local' : 'Cloud'} • ${config.provider} • ${config.model}` : 'Loading...'}
           <br/><br/>
           <small>Model settings configured via backend .env</small>
         </div>

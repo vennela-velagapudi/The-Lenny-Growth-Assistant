@@ -1,41 +1,59 @@
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable
 from sqlmodel import Session
 from app.services.retriever import TranscriptRetriever
-from pi_agent.agent import Agent, AgentConfig
+from pi_agent.tools.base import Tool
+from pi_agent.sandbox import Sandbox
 from pi_agent.llm import LLMProvider
+from app.services.agent import InsufficientEvidenceException
 
 class ArtifactSkill:
-    def __init__(self, db_session: Session, provider: LLMProvider):
+    def __init__(self, db_session: Session, provider: LLMProvider, set_artifact_callback: Callable, get_history_callback: Callable):
         self.db = db_session
         self.provider = provider
+        self.set_artifact_callback = set_artifact_callback
+        self.get_history_callback = get_history_callback
         self.retriever = TranscriptRetriever(db_session, top_k=5, similarity_threshold=0.5)
 
-    async def execute(self, query: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:
-        """
-        Executes general artifact generation (Markdown or HTML).
-        """
-        if not history:
-            history = []
+    def get_tool(self) -> Tool:
+        return Tool(
+            name="generate_custom_artifact",
+            description="Generates a Markdown or HTML artifact based on transcript evidence for a given topic.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "The specific topic to generate an artifact about."
+                    },
+                    "artifact_type": {
+                        "type": "string",
+                        "enum": ["markdown", "html"],
+                        "description": "The format of the artifact."
+                    }
+                },
+                "required": ["topic", "artifact_type"]
+            },
+            handler=self.handler
+        )
 
-        # Determine type (HTML vs Markdown)
-        artifact_type = "markdown"
-        if "html" in query.lower() or "landing page" in query.lower() or "css" in query.lower():
-            artifact_type = "html"
+    def handler(self, args: dict[str, Any], sandbox: Sandbox) -> str:
+        topic = args.get("topic", "")
+        artifact_type = args.get("artifact_type", "markdown")
+        if not topic:
+            return "Error: missing topic."
+
+        # Fetch recent history
+        history = self.get_history_callback()
+        
+        search_query = topic
+        if history:
+            search_query = f"{history[-1].get('content', '')} {topic}"
 
         # 1. Retrieve explicitly
-        search_query = query
-        if history:
-            search_query = f"{history[-1]['content']} {query}"
-            
         result = self.retriever.retrieve(search_query)
         if not result.has_relevant_context:
-            return {
-                "answer": "I couldn't find sufficient evidence in the available Lenny transcript knowledge base to answer that confidently.",
-                "grounded": False,
-                "sources": [],
-                "artifact": None
-            }
+            raise InsufficientEvidenceException()
 
         sources = []
         context_text = ""
@@ -59,14 +77,14 @@ class ArtifactSkill:
             "Base your content STRICTLY on the provided evidence. Do not invent facts."
         )
 
-        # Include chat history context
-        history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-3:]])
-        user_prompt = f"Recent History:\n{history_text}\n\nUser Request: {query}\n\nEvidence:\n{context_text}"
+        history_text = "\n".join([f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in history[-3:]])
+        user_prompt = f"Recent History:\n{history_text}\n\nUser Request: {topic}\n\nEvidence:\n{context_text}"
 
-        config = AgentConfig(system_prompt=system_prompt, stream=False)
-        agent = Agent(provider=self.provider, config=config)
-
-        final_answer = agent.run(user_prompt)
+        from pi_agent.messages import NeutralMessage
+        messages = [NeutralMessage(role="user", content=user_prompt)]
+        
+        assistant_response = self.provider.complete(system=system_prompt, messages=messages)
+        final_answer = assistant_response.content
 
         # Clean up markdown codeblocks if it's HTML
         if artifact_type == "html":
@@ -78,13 +96,14 @@ class ArtifactSkill:
                 final_answer = final_answer[:-3]
             final_answer = final_answer.strip()
 
-        return {
-            "answer": f"I have generated the {artifact_type} artifact you requested. You can view it in the Artifact Viewer.",
-            "grounded": True,
-            "sources": sources,
-            "artifact": {
+        # 3. Store artifact and sources in the agent's state
+        self.set_artifact_callback(
+            artifact={
                 "type": artifact_type,
-                "title": "Generated Artifact",
+                "title": f"{artifact_type.upper()} Artifact: {topic[:20]}",
                 "content": final_answer
-            }
-        }
+            },
+            sources=sources
+        )
+
+        return f"{artifact_type} artifact successfully generated based on {len(sources)} transcript chunks. The user can view it in the Artifact Viewer."

@@ -30,3 +30,12 @@ app.include_router(sessions.router)
 async def health_check():
     logger.info("Health check endpoint called")
     return {"status": "ok"}
+
+@app.get("/api/config")
+async def get_config():
+    from app.core.config import settings
+    return {
+        "provider": settings.LLM_PROVIDER,
+        "model": settings.OLLAMA_MODEL if settings.LLM_PROVIDER.lower() == "ollama" else settings.ANTHROPIC_MODEL,
+        "mode": "local" if settings.LLM_PROVIDER.lower() == "ollama" else "cloud"
+    }

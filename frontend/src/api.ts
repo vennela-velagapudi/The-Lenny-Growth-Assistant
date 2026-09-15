@@ -35,6 +35,18 @@ export interface Session {
   created_at: string;
 }
 
+export interface AppConfig {
+  provider: string;
+  model: string;
+  mode: string;
+}
+
+export const fetchConfig = async (): Promise<AppConfig> => {
+  const res = await fetch(`${API_URL}/config`);
+  if (!res.ok) throw new Error('Failed to fetch config');
+  return res.json();
+};
+
 export const createSession = async (): Promise<Session> => {
   const res = await fetch(`${API_URL}/sessions`, {
     method: 'POST',

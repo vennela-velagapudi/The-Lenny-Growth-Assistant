@@ -1,41 +1,52 @@
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable
 from sqlmodel import Session
 from app.services.retriever import TranscriptRetriever
-from pi_agent.agent import Agent, AgentConfig
+from pi_agent.tools.base import Tool
+from pi_agent.sandbox import Sandbox
 from pi_agent.llm import LLMProvider
 from app.services.agent import InsufficientEvidenceException
 
+# We document the inability to locate the exact Ship30 source as required by the audit
+SHIP30_SOURCE_NOTE = (
+    "Note: The exact Ship 30 for 30 framework principles source document was not provided in the assignment repository. "
+    "Therefore, this essay strictly utilizes Lenny's podcast transcript evidence and follows a general Ship 30 formatting "
+    "structure. It does not cite or claim principles from the official Ship 30 framework."
+)
+
 class Ship30Skill:
-    def __init__(self, db_session: Session, provider: LLMProvider):
+    def __init__(self, db_session: Session, provider: LLMProvider, set_artifact_callback: Callable):
         self.db = db_session
         self.provider = provider
+        self.set_artifact_callback = set_artifact_callback
         self.retriever = TranscriptRetriever(db_session, top_k=8, similarity_threshold=0.5)
 
-    async def execute(self, query: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:
-        """
-        Executes the Ship 30 for 30 skill deterministically.
-        1. Retrieves transcripts based on the query.
-        2. If weak/no evidence, deterministically returns ungrounded error.
-        3. Invokes an agent/LLM explicitly prompted to write a Ship 30 format artifact.
-        """
-        if not history:
-            history = []
+    def get_tool(self) -> Tool:
+        return Tool(
+            name="generate_ship30_artifact",
+            description="Generates a ~1250 word Ship 30 for 30 essay based on transcript evidence for a given topic.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "The specific topic to write the Ship 30 essay about."
+                    }
+                },
+                "required": ["topic"]
+            },
+            handler=self.handler
+        )
+
+    def handler(self, args: dict[str, Any], sandbox: Sandbox) -> str:
+        topic = args.get("topic", "")
+        if not topic:
+            return "Error: missing topic."
 
         # 1. Retrieve explicitly
-        # We use a broad retrieval step combining history context and the specific query
-        search_query = query
-        if history:
-            search_query = f"{history[-1]['content']} {query}"
-            
-        result = self.retriever.retrieve(search_query)
+        result = self.retriever.retrieve(topic)
         if not result.has_relevant_context:
-            return {
-                "answer": "I couldn't find sufficient evidence in the available Lenny transcript knowledge base to answer that confidently.",
-                "grounded": False,
-                "sources": [],
-                "artifact": None
-            }
+            raise InsufficientEvidenceException()
 
         sources = []
         context_text = ""
@@ -52,11 +63,11 @@ class Ship30Skill:
             })
             context_text += f"\n\nSource: {r.episode_title} (Guest: {r.guest_name})\nText: {r.text}"
 
-        # 2. Invoke LLM for Ship30 generation
+        # 2. Generate artifact directly inside the tool
         system_prompt = (
             "You are a Ship 30 for 30 writing expert. Your task is to write a highly engaging, ~1250-word piece "
-            "based strictly on the provided transcript evidence from Lenny's Podcast. "
-            "Do not invent facts, quotes, or principles not found in the evidence.\n\n"
+            "based STRICTLY on the provided transcript evidence from Lenny's Podcast.\n"
+            f"{SHIP30_SOURCE_NOTE}\n\n"
             "Format the piece in Markdown with the following structure:\n"
             "- A strong, curiosity-inducing hook/narrative opening\n"
             "- Core idea (explain the principle)\n"
@@ -67,22 +78,23 @@ class Ship30Skill:
             "Only output the Markdown content, nothing else."
         )
 
-        user_prompt = f"User Request: {query}\n\nEvidence:\n{context_text}"
+        from pi_agent.messages import NeutralMessage
+        messages = [NeutralMessage(role="user", content=f"User Request: {topic}\n\nEvidence:\n{context_text}")]
+        
+        assistant_response = self.provider.complete(system=system_prompt, messages=messages)
+        final_answer = assistant_response.content
 
-        config = AgentConfig(system_prompt=system_prompt, stream=False)
-        agent = Agent(provider=self.provider, config=config)
+        # Add the disclaimer to the bottom of the artifact
+        final_answer += f"\n\n---\n*{SHIP30_SOURCE_NOTE}*"
 
-        # Ship30 doesn't need to recursively tool-call here because we already pre-fetched context. 
-        # But we use the Pi Agent for consistency.
-        final_answer = agent.run(user_prompt)
-
-        return {
-            "answer": "I have generated the Ship 30 for 30 piece you requested. You can view it in the Artifact Viewer.",
-            "grounded": True,
-            "sources": sources,
-            "artifact": {
+        # 3. Store artifact and sources in the agent's state
+        self.set_artifact_callback(
+            artifact={
                 "type": "markdown",
-                "title": "Ship 30 for 30: " + query[:30] + "...",
+                "title": f"Ship 30 for 30: {topic[:30]}",
                 "content": final_answer
-            }
-        }
+            },
+            sources=sources
+        )
+
+        return f"Ship 30 artifact successfully generated based on {len(sources)} transcript chunks. The user can view it in the Artifact Viewer."

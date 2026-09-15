@@ -57,3 +57,14 @@ Context is persisted in PostgreSQL. Conversations are isolated by `session_id`. 
 - UI & Viewer: React frontend split layout with interactive chat and side-by-side artifact viewer.
 - Security: HTML artifacts are sanitized via DOMPurify and placed inside a sandboxed iframe to prevent JS execution or DOM escape.
 
+
+### Ship 30 for 30 Skill and Attribution
+The Ship 30 for 30 functionality is implemented natively as a Pi Agent Tool (generate_ship30_artifact). 
+Note on Source Attribution: The exact Ship 30 for 30 framework principles source document was not provided in the assignment repository. Therefore, this skill strictly retrieves and uses Lenny's podcast transcript evidence and follows a general Ship 30 format, without claiming principles from the official Ship 30 framework.
+
+### Artifacts Tool
+Artifact generation is implemented as the generate_custom_artifact Pi Agent Tool. The agent invokes it passing the topic, which retrieves transcript evidence and returns a markdown or HTML structure natively.
+
+### Dynamic Provider Config
+The backend provides a GET /api/config endpoint which returns the current LLM_PROVIDER and model (e.g. OLLAMA_MODEL) dynamically, rendering properly in the frontend React UI without hardcoded JSX.
+
