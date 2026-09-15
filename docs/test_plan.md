@@ -21,7 +21,16 @@
 1. Obtain real transcripts (e.g., using `scripts/download_samples.py`) and run `python scripts/ingest.py`. Verify logs output positive chunk counts.
 2. Re-run `python scripts/ingest.py` and verify `Skipped unchanged` equals the number of files.
 
-## Manual Verification
+## Phase 3: Conversational Agent
+### Automated Tests
+- **Provider Switching**: Tests ensure that `LLM_PROVIDER` routes requests strictly to Anthropic or Ollama based on configs. (Implemented in `test_agent.py`).
+- **Grounding Interception**: Unit tests mock the retriever returning `has_relevant_context=False` to verify the deterministic "insufficient evidence" cutoff. (Implemented in `test_agent.py`).
+- **Missing Keys**: Tests validating graceful exception on missing API credentials.
+- **Session API contracts**: E2E test client validates session isolation and conversational state storage. (Implemented in `test_sessions_api.py`).
+
+### Manual Tests
+1. Setup Ollama. Send `POST /api/sessions` to get ID. Send message with specific podcast fact, observe retrieved chunks and grounding.
+2. Swap to Anthropic in `.env`. Send identical queries. Validate Agent SDK execution.
 1.  **Setup:** Run `docker compose up`, verify all 4 containers start.
 2.  **Ollama Demo:** Ask a question, verify local inference works.
 3.  **Provider Switch:** Change `.env` to `Anthropic`, restart, verify cloud inference works.

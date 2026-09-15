@@ -15,3 +15,8 @@ def create_db_and_tables():
         logger = structlog.get_logger()
         logger.warning("Could not create vector extension, skipping", error=str(e))
     # Note: We now rely on Alembic for creating tables.
+
+def get_session():
+    from sqlmodel import Session
+    with Session(engine) as session:
+        yield session

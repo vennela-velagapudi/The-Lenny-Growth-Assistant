@@ -27,4 +27,8 @@
 - An idempotent ingestion script must reliably parse markdown, chunk (target 600 tokens), embed, and store text.
 - Retrieval must return top-K results ordered by similarity.
 - Retrieval must identify `has_relevant_context=False` if no results meet the minimum similarity threshold.
-- Chunks must retain `episode_title`, `source_url`, and other metadata for citation generation downstream.
+## Acceptance Criteria (Phase 3: Agent)
+- The system must provide independent sessions, correctly isolating context per session.
+- An agent loop utilizing the official **Anthropic Agent SDK** (with an Ollama alternative) must orchestrate tool usage.
+- Grounding must be strictly deterministic: If the retriever yields weak evidence, the application must abort generating an answer using a pre-defined fallback prompt.
+- Source traceability must remain intact and bubbled out to the JSON response interface.

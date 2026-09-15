@@ -10,6 +10,13 @@ A full-stack AI conversational web application built as a Forward Deployed Engin
 - Artifact generation and secure rendering (Markdown & HTML).
 - PostgreSQL with pgvector for persistence and retrieval.
 
+## Architecture
+
+This project is structured as a FastAPI backend powered by PostgreSQL (`pgvector`).
+- **Retrieval System**: Transcripts are ingested natively. Cosine distance retrieves the top-K semantic matches.
+- **Conversational Agent**: We utilize the official **Anthropic Claude Agent SDK** for tool routing. A deterministic grounding policy short-circuits the LLM if evidence falls below the threshold, preventing hallucination.
+- **LLM Provider Abstraction**: Supports both Anthropic Claude (via the SDK) and local execution via Ollama (using `/api/chat` native tools).
+
 ## Setup Instructions
 1. Copy `.env.example` to `.env` and fill in necessary values.
 2. Run `docker compose up --build` to start the application.
@@ -31,3 +38,8 @@ docker compose exec backend python scripts/ingest.py
 *(Alternatively, run `python scripts/ingest.py` locally from the `backend` directory if outside Docker).*
 
 If you do not have Docker/Ollama, ingestion will fail to generate embeddings unless a mocked environment is configured.
+
+### Testing the API
+Session creation and agent execution can be hit directly via the REST API endpoints:
+- `POST /api/sessions` (Create a chat session)
+- `POST /api/sessions/{session_id}/messages` (Send a message and trigger the agent loop)
