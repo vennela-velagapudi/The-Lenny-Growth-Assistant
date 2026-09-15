@@ -49,12 +49,16 @@ def test_agent_insufficient_evidence_deterministic(mock_db_session):
             
             agent.retriever.retrieve = MagicMock(return_value=mock_result)
             
-            # Since the provider is mocked, we need to mock the agent loop 
-            # to just call our handler directly to simulate LLM tool usage
-            with patch("pi_agent.agent.Agent.run") as mock_run:
-                # The LLM "calls" the tool which raises the exception
-                mock_run.side_effect = InsufficientEvidenceException()
-                
+            # Mock the OpenAIProvider.complete to simulate the LLM choosing to use the tool
+            from pi_agent.llm import AssistantResponse, ToolCall
+            
+            def mock_complete(*args, **kwargs):
+                return AssistantResponse(
+                    text="",
+                    tool_calls=[ToolCall(id="test_call", name="search_transcripts", args={"query": "test"})]
+                )
+            
+            with patch("pi_agent.llm.OpenAIProvider.complete", side_effect=mock_complete):
                 resp = await agent.run("tell me about X", [])
                 
                 # Check deterministic short circuit
@@ -86,13 +90,35 @@ def test_agent_tool_handler_success(mock_db_session):
             mock_result.results = [mock_source]
             agent.retriever.retrieve = MagicMock(return_value=mock_result)
             
-            # Verify tool handler behavior directly
-            import json
-            output = agent.search_transcripts_handler({"query": "test"}, None)
-            parsed = json.loads(output)
+            from pi_agent.llm import AssistantResponse, ToolCall
             
-            assert agent.current_grounded is True
-            assert len(parsed) == 1
-            assert parsed[0]["source_id"] == "test-123"
+            # 1. LLM requests tool
+            # 2. Tool handler runs, stores sources, returns JSON
+            # 3. LLM returns final string text
             
+            call_count = [0]
+            def mock_complete(*args, **kwargs):
+                if call_count[0] == 0:
+                    call_count[0] += 1
+                    return AssistantResponse(
+                        text="",
+                        tool_calls=[ToolCall(id="test_call", name="search_transcripts", args={"query": "test"})]
+                    )
+                else:
+                    return AssistantResponse(text="Final answer based on transcripts", tool_calls=[])
+                    
+            with patch("pi_agent.llm.OpenAIProvider.complete", side_effect=mock_complete):
+                resp = await agent.run("tell me about X", [])
+                
+                assert resp.grounded is True
+                assert resp.answer == "Final answer based on transcripts"
+                
+                assert len(resp.sources) == 1
+                assert resp.sources[0]["episode_title"] == "Ep 1"
+                assert resp.sources[0]["guest_name"] == "Guest"
+                assert resp.sources[0]["source_url"] == "http://example.com"
+                assert resp.sources[0]["transcript_url"] == "http://example.com/t"
+                assert resp.sources[0]["chunk_index"] == 0
+                assert resp.sources[0]["similarity"] == 0.9
+                
     anyio.run(run_test)
